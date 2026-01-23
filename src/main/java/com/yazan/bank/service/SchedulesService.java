@@ -23,17 +23,20 @@ public class SchedulesService {
     private final InstructorsRepository instructorsRepository;
     private final RoomRepository roomsRepository;
     private final TimeSlotRepository timeSlotsRepository;
+    private final SqsNotificationService sqsNotificationService;
 
     public SchedulesService(SchedulesRepository scheduleRepository,
                             CoursesRepository coursesRepository,
                             InstructorsRepository instructorsRepository,
                             RoomRepository roomsRepository,
-                            TimeSlotRepository timeSlotsRepository) {
+                            TimeSlotRepository timeSlotsRepository,
+                            SqsNotificationService sqsNotificationService) {
         this.scheduleRepository = scheduleRepository;
         this.coursesRepository = coursesRepository;
         this.instructorsRepository = instructorsRepository;
         this.roomsRepository = roomsRepository;
         this.timeSlotsRepository = timeSlotsRepository;
+        this.sqsNotificationService = sqsNotificationService;
     }
     @Transactional
     public List<Schedules> addSchedulesById(List<CreateScheduleRequest> requestList) {
@@ -105,7 +108,17 @@ public class SchedulesService {
 
         }
 
-        return scheduleRepository.saveAll(schedules);
+        List<Schedules> savedSchedules = scheduleRepository.saveAll(schedules);
+        
+        // Send SQS notification after successful save
+        try {
+            sqsNotificationService.sendBatchScheduleNotification("SCHEDULE_BATCH_UPDATE", savedSchedules.size());
+        } catch (Exception e) {
+            // Log error but don't fail the request
+            System.err.println("Failed to send SQS notification: " + e.getMessage());
+        }
+
+        return savedSchedules;
     }
 
 
@@ -140,7 +153,16 @@ public class SchedulesService {
         if (!scheduleRepository.existsById(id)) {
             throw new RuntimeException("Schedule not found with id: " + id);
         }
+        
         scheduleRepository.deleteById(id);
+        
+        // Send SQS notification after successful deletion
+        try {
+            sqsNotificationService.sendScheduleNotification("SCHEDULE_DELETE", id, null, null);
+        } catch (Exception e) {
+            // Log error but don't fail the request
+            System.err.println("Failed to send SQS notification for deletion: " + e.getMessage());
+        }
     }
 
 
